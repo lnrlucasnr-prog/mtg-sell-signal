@@ -1,0 +1,16 @@
+# Local data: raw downloads and profiling output stay on your machine
+data/
+
+# Daily run logs
+logs/
+
+# Tableau CSV exports (contain personal collection data)
+exports/
+
+# Local connection settings
+ETL/config.ini
+
+# Python
+__pycache__/
+*.pyc
+.venv/
