@@ -34,14 +34,24 @@ The sell rules were backtested on about 449,000 card observations: every card wo
 
 ```mermaid
 flowchart LR
-    A\[Scryfall<br/>daily card + price file] --> P\[Python ETL]
-    B\[MTGJSON<br/>Card Kingdom buylist] --> P
-    C\[ManaBox exports<br/>collection + decks] --> P
-    D\[Archived MTGJSON files<br/>2021 and 2023 seasons] -.one-time.-> P
-    P --> S\[(SQL Server<br/>warehouse)]
-    S --> M\[Metrics, spike study,<br/>sell rules, backtest]
-    M --> E\[CSV export]
-    E --> T\[Tableau Public]
+    scryfall["Scryfall: daily cards and prices"]
+    buylist["MTGJSON: Card Kingdom buylist"]
+    manabox["ManaBox: collection and decks"]
+    archive["Archived MTGJSON: 2021 and 2023 seasons"]
+    etl["Python ETL"]
+    warehouse[("SQL Server warehouse")]
+    analysis["Metrics, spike study, sell rules, backtest"]
+    csv["CSV export"]
+    tableau["Tableau Public"]
+
+    scryfall --> etl
+    buylist --> etl
+    manabox --> etl
+    archive -. "one-time" .-> etl
+    etl --> warehouse
+    warehouse --> analysis
+    analysis --> csv
+    csv --> tableau
 ```
 
 **Daily (Windows Task Scheduler):**
