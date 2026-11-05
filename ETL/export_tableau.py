@@ -29,6 +29,7 @@ DATASETS = {
     "backtest_by_rule":    "SELECT * FROM dw.backtest_by_rule",
     "backtest_by_date":    "SELECT * FROM dw.backtest_by_date",
     "backtest_by_period":  "SELECT * FROM dw.backtest_by_period",
+    "backtest_by_horizon": "SELECT * FROM dw.backtest_by_horizon",
     "spike_patterns":      "SELECT * FROM dw.study_spike_stats",
     "peer_baseline":       "SELECT * FROM dw.study_peer_stats",
     "peer_baseline_by_age": "SELECT * FROM dw.study_peer_stats_by_age",

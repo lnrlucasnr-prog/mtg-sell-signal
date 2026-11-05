@@ -1,3 +1,4 @@
 requests
 pyodbc
 ijson
+py7zr

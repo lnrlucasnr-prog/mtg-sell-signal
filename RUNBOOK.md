@@ -49,6 +49,7 @@ Force a rerun at any time: `python ETL\refresh_analytics.py --study`
 | `ETL/profile_scryfall.py` | Profiles the Scryfall file (field types, lengths, price coverage) before designing tables. |
 | `ETL/backfill_mtgjson.py` | Loads ~90 days of market price history from MTGJSON, before the first Scryfall snapshot. |
 | `ETL/load_buylist.py --backfill` | Loads ~90 days of Card Kingdom buylist history. Refuses to run once daily buylist rows exist, unless `--force`. |
+| `ETL/load_tcgcsv.py` | Loads daily TCGplayer market prices from Feb 8, 2024 up to the regular history, from the [TCGCSV](https://tcgcsv.com) price archive. Downloads each daily file once into `data/raw/tcgcsv/` (about 1 GB, kept; reruns reuse it). Rerunnable: replaces all `tcgcsv` rows. Run after `load_archive.py`, then `refresh_analytics.py --study`. |
 | `ETL/load_archive.py` | Loads older seasons of market + buylist prices from archived MTGJSON files in `data/raw/archive/` (saved from the Wayback Machine). Rerunnable: replaces all archive rows each time. Follow with `refresh_analytics.py --study`. |
 
 **Archive files** (`data/raw/archive/`, not in Git; keep a copy, the loader needs them to rerun):
@@ -58,6 +59,8 @@ Force a rerun at any time: `python ETL\refresh_analytics.py --study`
 | `AllPrices_2022-01-05.json.zip` | Oct 5, 2021 – Jan 5, 2022 |
 | `AllPrices_2023-05-29.json.zip` | Feb 28 – May 29, 2023 |
 | `AllPricesToday_2025-07-08.json.zip` | Jul 8, 2025 (one day; not used by the study, kept for long-range comparisons) |
+
+The Jul 2025 file is superseded once `load_tcgcsv.py` has run (its rows are replaced by the continuous TCGCSV history); the loader then skips it.
 
 The years between these stretches have no prices; nothing is filled in. `dw.vw_price_window` lists every stretch, and the spike study only observes dates with 30 days of history before and after inside one stretch.
 
@@ -144,7 +147,7 @@ Change with `UPDATE dw.app_setting SET setting_value = ... WHERE setting_name = 
 | `spike_min_examples` | 100 | Past spikes needed before a pattern's track record is trusted |
 | `peer_sell_threshold` | −0.05 | Sell when similar cards typically drop this much next month |
 | `peer_min_examples` | 30 | Observations needed before a peer group is trusted |
-| `study_max_dates` | 12 | Weekly past dates the spike study observes, per stretch of price history |
+| `study_max_dates` | 24 | Past dates the spike study observes per stretch of price history: weekly, or spread evenly over a longer stretch |
 | `metrics_retain_days` | 7 | Days of daily `card_metrics` snapshots kept |
 
 Sell channels (Card Kingdom buylist, local store estimate percentages) are in `dw.dim_sell_channel`.
@@ -155,13 +158,14 @@ Sell channels (Card Kingdom buylist, local store estimate percentages) are in `d
 
 1. Install Python, then `pip install -r requirements.txt`. Install the Microsoft ODBC Driver for SQL Server if none is present.
 2. Copy `ETL/config.example.ini` to `ETL/config.ini` and fill in the server, database and Drive folder.
-3. Run the SQL scripts in SSMS **in order**: `01` through `11`. (`02_fix_cmc_size.sql` is only needed for databases created before the `cmc` fix; it is harmless otherwise.)
+3. Run the SQL scripts in SSMS **in order**: `01` through `12`. (`02_fix_cmc_size.sql` is only needed for databases created before the `cmc` fix; it is harmless otherwise.)
 4. From the project folder, run once, in order:
    ```
    python ETL\load_scryfall.py
    python ETL\backfill_mtgjson.py
    python ETL\load_buylist.py --backfill
    python ETL\load_archive.py
+   python ETL\load_tcgcsv.py
    python ETL\import_manabox.py
    python ETL\refresh_analytics.py --study
    python ETL\export_tableau.py
@@ -186,6 +190,7 @@ mtg-sell-signal/
 │   ├── export_tableau.py     daily: CSVs for Tableau Public
 │   ├── backfill_mtgjson.py   one-time: 90-day market price history
 │   ├── load_archive.py       one-time: older seasons from archived MTGJSON files
+│   ├── load_tcgcsv.py        one-time: daily TCGplayer prices from Feb 2024 (TCGCSV)
 │   ├── profile_scryfall.py   one-time: data profiling
 │   ├── config.example.ini    settings template (config.ini is not in Git)
 ├── sql/
@@ -199,7 +204,8 @@ mtg-sell-signal/
 │   ├── 08_sell_signals.sql        signal rules (dw.fn_sell_signal) + live view
 │   ├── 09_backtest.sql            backtest
 │   ├── 10_tableau_views.sql       dashboard datasets
-│   └── 11_archive_prices.sql      archived price seasons (Wayback MTGJSON files)
+│   ├── 11_archive_prices.sql      archived price seasons (Wayback MTGJSON files)
+│   └── 12_tcgcsv_prices.sql       daily TCGplayer history from Feb 2024 + source check
 ├── data/                     raw downloads (not in Git)
 ├── logs/                     daily_load.log (not in Git)
 └── exports/tableau/          dashboard CSVs (not in Git: contain collection data)

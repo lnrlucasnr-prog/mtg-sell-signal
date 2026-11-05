@@ -18,7 +18,8 @@
    Price history can have gaps (archived seasons from 11_archive_prices.sql plus
    the continuous daily history). dw.vw_price_window lists each stretch of
    history; the study only picks dates with 30 days before AND after inside
-   one stretch, up to study_max_dates per stretch.
+   one stretch, up to study_max_dates per stretch (weekly, or spread evenly
+   over a longer stretch).
 
    Re-run it monthly (EXEC dw.usp_run_spike_study): as daily history grows,
    more dates become observable and the findings get sturdier.
@@ -31,7 +32,7 @@ SELECT v.setting_name, v.setting_value, v.description
 FROM (VALUES
     ('sharp_spike_share', 0.60, N'A spike is "Sharp" when at least this share of its 30-day gain came in the last 7 days'),
     ('broad_breadth_pct', 0.10, N'A spike is "Broad" when the card''s other printings rose at least this much over 30 days'),
-    ('study_max_dates',   12,   N'Maximum number of weekly past dates the spike study observes in each stretch of price history')
+    ('study_max_dates',   12,   N'Maximum number of past dates the spike study observes in each stretch of price history (weekly, or spread evenly over longer stretches)')
 ) AS v(setting_name, setting_value, description)
 WHERE NOT EXISTS (SELECT 1 FROM dw.app_setting s WHERE s.setting_name = v.setting_name);
 GO
@@ -195,18 +196,30 @@ BEGIN
 
     CREATE TABLE #sink (as_of_date DATE, cards_measured INT, with_30d_history INT);
 
-    -- Observation dates: weekly, walking back from 30 days before the end of each
-    -- stretch of history, while 30 days of history before the date are still inside it.
+    -- Observation dates: walking back from 30 days before the end of each stretch of
+    -- history, while 30 days of history before the date are still inside it.
+    -- Weekly when a stretch has room for at most @max_n dates; a longer stretch is
+    -- spread evenly (every 2, 3, ... weeks) so it is covered end to end with @max_n dates.
     CREATE TABLE #dates (as_of_date DATE PRIMARY KEY);
     WITH n AS (
         SELECT TOP (@max_n) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) - 1 AS k
         FROM sys.all_objects
+    ), w AS (
+        SELECT first_date, last_date,
+               DATEDIFF(DAY, first_date, last_date) - 60 AS room_days
+        FROM dw.vw_price_window
+        WHERE DATEDIFF(DAY, first_date, last_date) >= 60
+    ), ws AS (
+        SELECT first_date, last_date,
+               CASE WHEN room_days / 7 + 1 <= @max_n THEN 7
+                    ELSE 7 * CEILING((room_days / 7 + 1) / CAST(@max_n AS FLOAT)) END AS step_days
+        FROM w
     )
     INSERT #dates (as_of_date)
-    SELECT DISTINCT DATEADD(DAY, -30 - 7 * n.k, w.last_date)
-    FROM dw.vw_price_window AS w
+    SELECT DISTINCT DATEADD(DAY, -30 - CAST(ws.step_days AS INT) * n.k, ws.last_date)
+    FROM ws
     CROSS JOIN n
-    WHERE DATEADD(DAY, -60 - 7 * n.k, w.last_date) >= w.first_date;
+    WHERE DATEADD(DAY, -60 - CAST(ws.step_days AS INT) * n.k, ws.last_date) >= ws.first_date;
 
     TRUNCATE TABLE dw.study_observation;
 

@@ -5,6 +5,16 @@
    signals (dw.vw_sell_signals) and the backtest (09_backtest.sql), so the two
    can never drift apart.
 
+   Signals, most urgent first:
+     Sell now     falling, or likely to fall, within the month (and the backtest shows
+                  these keep falling: about -20% after 6 months)
+     Sell soon    a rising spike: the climb usually continues for a few weeks, but the
+                  backtest shows the edge is gone by about 3-6 months. Sell into the rise.
+     Watch        a big move with no clear pattern; check weekly
+     Hold (rising) Card Kingdom pays market or more (low risk, tends to rise)
+     Hold         no reason to sell this month; the long-term direction is uncertain
+     Not worth selling  under min_sell_price
+
    Rules are checked in order; the first match wins. Every threshold lives in
    dw.app_setting, and the spike and peer rules read the saved spike-study
    results, so each weekly study rerun retunes the signals.
@@ -16,7 +26,7 @@
                             buylist on demand before the market price catches up.
      3/4/5. Spikes (30-day rise >= spike_pct), judged by their pattern's track record:
           share of similar spikes that fell 10%+  >= spike_sell_fell_share   -> Sell now
-          share of similar spikes that kept rising >= spike_hold_rising_share -> Hold (rising)
+          share of similar spikes that kept rising >= spike_hold_rising_share -> Sell soon
           otherwise (or too few examples)                                    -> Watch
      6. Sell now            peers (same set age, rarity, price tier) typically
                             drop peer_sell_threshold or more over the next 30 days
@@ -33,12 +43,17 @@ INSERT dw.app_setting (setting_name, setting_value, description)
 SELECT v.setting_name, v.setting_value, v.description
 FROM (VALUES
     ('spike_sell_fell_share',   0.25,  N'Sell a spike when at least this share of similar past spikes fell 10%+ within 30 days'),
-    ('spike_hold_rising_share', 0.55,  N'Hold a spike when at least this share of similar past spikes kept rising'),
+    ('spike_hold_rising_share', 0.55,  N'Flag a spike "Sell soon" (sell into the rise) when at least this share of similar past spikes kept rising'),
     ('spike_min_examples',      100,   N'Minimum past spikes in a pattern before its track record is trusted'),
     ('peer_sell_threshold',    -0.05,  N'Sell when similar cards typically drop at least this much over the next 30 days'),
     ('peer_min_examples',       30,    N'Minimum observations in a peer group before it is trusted')
 ) AS v(setting_name, setting_value, description)
 WHERE NOT EXISTS (SELECT 1 FROM dw.app_setting s WHERE s.setting_name = v.setting_name);
+GO
+
+UPDATE dw.app_setting
+SET description = N'Flag a spike "Sell soon" (sell into the rise) when at least this share of similar past spikes kept rising'
+WHERE setting_name = 'spike_hold_rising_share';
 GO
 
 /* -----------------------------------------------------------------------------
@@ -117,14 +132,16 @@ WITH cfg AS (
 SELECT r.rule_no,
        CASE WHEN r.rule_no = 1 THEN 'Not worth selling'
             WHEN r.rule_no IN (2, 3, 6) THEN 'Sell now'
-            WHEN r.rule_no IN (4, 9) THEN 'Hold (rising)'
+            WHEN r.rule_no = 4 THEN 'Sell soon'
+            WHEN r.rule_no = 9 THEN 'Hold (rising)'
             WHEN r.rule_no IN (5, 7) THEN 'Watch'
             ELSE 'Hold' END                                         AS signal,
        CASE WHEN r.rule_no IN (2, 3, 6) THEN 1
-            WHEN r.rule_no IN (5, 7) THEN 2
-            WHEN r.rule_no IN (4, 9) THEN 3
-            WHEN r.rule_no = 8 THEN 4
-            ELSE 5 END                                              AS signal_sort,
+            WHEN r.rule_no = 4 THEN 2
+            WHEN r.rule_no IN (5, 7) THEN 3
+            WHEN r.rule_no = 9 THEN 4
+            WHEN r.rule_no = 8 THEN 5
+            ELSE 6 END                                              AS signal_sort,
        r.min_price,
        r.is_spike,
        r.spike_speed,
@@ -137,8 +154,22 @@ SELECT r.rule_no,
 FROM r;
 GO
 
-/* The live signals quote the backtest's result for rule 9, so the table it is
-   stored in must exist before the view (09_backtest.sql fills it). */
+/* The live signals quote backtest results, so the tables they are stored in
+   must exist before the view (09_backtest.sql fills them). */
+IF OBJECT_ID('dw.backtest_by_horizon') IS NULL
+CREATE TABLE dw.backtest_by_horizon (
+    horizon_days         INT           NOT NULL,   -- 30, 90, 180, 365
+    signal               VARCHAR(20)   NOT NULL,
+    signal_sort          INT           NOT NULL,
+    observations         INT           NOT NULL,
+    median_chg           DECIMAL(9,4)  NULL,
+    share_fell_10pct     DECIMAL(5,3)  NULL,
+    share_rose_10pct     DECIMAL(5,3)  NULL,
+    run_at               DATETIME2(0)  NOT NULL DEFAULT SYSDATETIME(),
+    CONSTRAINT pk_backtest_by_horizon PRIMARY KEY (horizon_days, signal)
+);
+GO
+
 IF OBJECT_ID('dw.backtest_by_rule') IS NULL
 CREATE TABLE dw.backtest_by_rule (
     rule_no              INT           NOT NULL PRIMARY KEY,
@@ -186,7 +217,13 @@ SELECT m.card_name,
            WHEN 4 THEN CONCAT(N'Up ', FORMAT(m.chg_30d, 'P0'), N' in 30 days (', s.spike_speed, N', ',
                               LOWER(s.spike_momentum), N', ', LOWER(s.spike_breadth), N'). ',
                               FORMAT(s.pattern_share_rising, 'P0'),
-                              N' of similar climbs kept rising.')
+                              N' of similar climbs kept rising, ',
+                              CASE WHEN h180.median_chg IS NOT NULL
+                                   THEN CONCAT(N'but the gain usually fades (median ',
+                                               FORMAT(h90.median_chg, '+0%;-0%;0%'), N' after 3 months, ',
+                                               FORMAT(h180.median_chg, '+0%;-0%;0%'), N' after 6). ')
+                                   ELSE N'but the gain usually fades within months. ' END,
+                              N'Sell into the rise within a few weeks.')
            WHEN 5 THEN CONCAT(N'Up ', FORMAT(m.chg_30d, 'P0'), N' in 30 days (', s.spike_speed, N', ',
                               LOWER(s.spike_momentum), N', ', LOWER(s.spike_breadth),
                               N'). No clear edge either way; check weekly.')
@@ -196,7 +233,12 @@ SELECT m.card_name,
                               N' in 30 days without a clear pattern; check weekly.')
            ELSE CONCAT(N'Stable. Similar cards typically move ',
                        ISNULL(FORMAT(s.peer_median_next_30d, 'P0'), N'about 0%'),
-                       N' over the next month.')
+                       N' over the next month. No reason to rush',
+                       CASE WHEN h365.share_rose_10pct IS NOT NULL
+                            THEN CONCAT(N', but long-term it''s a coin flip: after a year, ',
+                                        FORMAT(h365.share_rose_10pct, 'P0'), N' of cards like this were up 10%+ and ',
+                                        FORMAT(h365.share_fell_10pct, 'P0'), N' down 10%+.')
+                            ELSE N'.' END)
        END                                                          AS signal_reason,
        CASE WHEN m.chg_30d = 0
             THEN N'No price change in 30 days (thinly traded): the CK offer is the more reliable value.'
@@ -225,7 +267,9 @@ SELECT m.card_name,
        m.card_key,
        m.oracle_id,
        m.as_of_date,
-       dc.image_url                         -- new columns go at the END (keeps Tableau's CSV layout stable)
+       dc.image_url,                        -- new columns go at the END (keeps Tableau's CSV layout stable)
+       CONCAT(m.card_name, N' · ', UPPER(m.set_code), N' #', dc.collector_number,
+              N' (', m.finish, N')')        AS card_label   -- same text as the Card Detail page
 FROM dw.vw_sell_candidate_metrics AS m
 JOIN dw.dim_card AS dc ON dc.card_key = m.card_key
 LEFT JOIN dw.vw_current_buylist AS b
@@ -238,5 +282,11 @@ OUTER APPLY (SELECT TOP 1 cash_pct_of_market, credit_pct_of_market
              FROM dw.dim_sell_channel
              WHERE uses_buylist = 0 AND is_active = 1
              ORDER BY channel_key) AS lgs
-OUTER APPLY (SELECT avg_next_30d FROM dw.backtest_by_rule WHERE rule_no = 9) AS bt9;
+OUTER APPLY (SELECT avg_next_30d FROM dw.backtest_by_rule WHERE rule_no = 9) AS bt9
+OUTER APPLY (SELECT median_chg FROM dw.backtest_by_horizon
+             WHERE signal = 'Sell soon' AND horizon_days = 90)  AS h90
+OUTER APPLY (SELECT median_chg FROM dw.backtest_by_horizon
+             WHERE signal = 'Sell soon' AND horizon_days = 180) AS h180
+OUTER APPLY (SELECT share_rose_10pct, share_fell_10pct FROM dw.backtest_by_horizon
+             WHERE signal = 'Hold' AND horizon_days = 365)      AS h365;
 GO

@@ -16,6 +16,7 @@
                                      sets released in any stretch of price history
      dw.vw_tableau_run_info          data freshness for the dashboard footer
      dw.vw_dashboard_findings        data-driven finding sentences for the dashboard
+                                     (incl. long_horizon: Sell now after 1 vs 6 months)
 ============================================================================= */
 USE mtg;
 GO
@@ -159,6 +160,7 @@ WITH bounds AS (
            f.price_usd / k.early_price AS price_index
     FROM cards AS k
     JOIN dw.dim_date AS d ON d.date_value BETWEEN k.early_date AND k.last_day
+                         AND d.date_value <= DATEADD(DAY, 365, k.release_date)   -- first year after release
     JOIN dw.fact_price AS f
          ON f.card_key = k.card_key AND f.finish = 'nonfoil'
         AND d.date_value BETWEEN f.valid_from AND ISNULL(f.valid_to, '9999-12-31')
@@ -235,6 +237,13 @@ WITH cfg AS (
                                                                                 AS chase_sets_held
     FROM curve_last
     WHERE rn = 1 AND days_since_release >= 30
+), horizon AS (
+    SELECT MAX(CASE WHEN signal = 'Sell now' AND horizon_days = 30  THEN median_chg END) AS sell_30,
+           MAX(CASE WHEN signal = 'Sell now' AND horizon_days = 180 THEN median_chg END) AS sell_180,
+           MAX(CASE WHEN signal = 'Sell now' AND horizon_days = 180 THEN share_fell_10pct END) AS sell_180_fell,
+           MAX(CASE WHEN signal = 'Hold'     AND horizon_days = 180 THEN share_fell_10pct END) AS hold_180_fell,
+           MAX(CASE WHEN signal = 'Sell now' AND horizon_days = 180 THEN observations END) AS sell_180_n
+    FROM dw.backtest_by_horizon
 ), study AS (
     SELECT COUNT(DISTINCT o.as_of_date) AS dates, MIN(o.as_of_date) AS first_date,
            MAX(o.as_of_date) AS last_date, COUNT(DISTINCT w.first_date) AS periods
@@ -267,8 +276,18 @@ SELECT 3, 'set_curve',
                                N' sets.') END)
 FROM curve AS c
 UNION ALL
+SELECT 5, 'long_horizon',
+       CONCAT(N'The sell signal lasts: cards flagged Sell now moved a median ',
+              FORMAT(h.sell_30, '+0%;-0%;0%'), N' after one month and ',
+              FORMAT(h.sell_180, '+0%;-0%;0%'), N' after six months; ',
+              FORMAT(h.sell_180_fell, 'P0'), N' had fallen 10%+ by then, versus ',
+              FORMAT(h.hold_180_fell, 'P0'), N' of Hold cards (',
+              FORMAT(h.sell_180_n, 'N0'), N' observations).')
+FROM horizon AS h
+WHERE h.sell_180 IS NOT NULL
+UNION ALL
 SELECT 4, 'footnote',
-       CONCAT(N'Backtest covers ', s.dates, N' weekly dates',
+       CONCAT(N'Backtest covers ', s.dates, N' past dates',
               CASE WHEN s.periods > 1
                    THEN CONCAT(N' in ', s.periods, N' separate stretches of price history (',
                                FORMAT(s.first_date, 'MMM yyyy'), N' to ', FORMAT(s.last_date, 'MMM yyyy'), N')')

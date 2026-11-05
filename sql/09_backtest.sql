@@ -13,6 +13,10 @@
    results look better than truly unseen data would. As daily history grows,
    compare new dates against stats from older ones for an out-of-sample test.
 
+   Longer view: dw.backtest_by_horizon follows the same cards 90, 180 and 365
+   days after the signal (wherever that much later history exists), to show
+   whether a signal still holds months later or only for the next 30 days.
+
    Robustness check: dw.backtest_by_period repeats the signal results for each
    stretch of price history (archived seasons vs. the daily history). Rules that
    only work in one season are luck; rules that hold in every season are real.
@@ -190,9 +194,33 @@ BEGIN
           FROM #bt GROUP BY period_name) AS d
       ON d.period_name = p.period_name;
 
+    -- Long horizons: each card's actual price 90 / 180 / 365 days after the signal
+    SELECT b.signal, b.signal_sort, x.horizon_days, f.price_usd / b.price_then - 1 AS chg
+    INTO #hz
+    FROM #bt AS b
+    CROSS JOIN (VALUES (90), (180), (365)) AS x(horizon_days)
+    JOIN dw.fact_price AS f
+      ON f.card_key = b.card_key AND f.finish = b.finish
+     AND DATEADD(DAY, x.horizon_days, b.as_of_date) BETWEEN f.valid_from AND ISNULL(f.valid_to, '9999-12-31');
+
+    INSERT #hz (signal, signal_sort, horizon_days, chg)
+    SELECT signal, signal_sort, 30, fwd_chg_30d FROM #bt;
+
+    TRUNCATE TABLE dw.backtest_by_horizon;
+    INSERT dw.backtest_by_horizon (horizon_days, signal, signal_sort, observations, median_chg,
+        share_fell_10pct, share_rose_10pct)
+    SELECT DISTINCT horizon_days, signal, signal_sort,
+           COUNT(*) OVER (PARTITION BY horizon_days, signal),
+           PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY chg) OVER (PARTITION BY horizon_days, signal),
+           AVG(CASE WHEN chg <= -0.10 THEN 1.0 ELSE 0 END) OVER (PARTITION BY horizon_days, signal),
+           AVG(CASE WHEN chg >=  0.10 THEN 1.0 ELSE 0 END) OVER (PARTITION BY horizon_days, signal)
+    FROM #hz;
+
     SELECT * FROM dw.backtest_by_signal ORDER BY signal_sort;
     SELECT * FROM dw.backtest_by_rule   ORDER BY median_next_30d;
     SELECT period_name, signal, dates_observed, observations, median_next_30d, share_fell_10pct
     FROM dw.backtest_by_period ORDER BY period_start, signal_sort;
+    SELECT horizon_days, signal, observations, median_chg, share_fell_10pct, share_rose_10pct
+    FROM dw.backtest_by_horizon ORDER BY horizon_days, signal_sort;
 END
 GO

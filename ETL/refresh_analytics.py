@@ -68,6 +68,7 @@ def main() -> None:
             rows = cur.execute("EXEC dw.usp_run_backtest").fetchall()
             cur.nextset()                 # by rule (not printed)
             periods = cur.fetchall() if cur.nextset() else []
+            horizons = cur.fetchall() if cur.nextset() else []
             while cur.nextset():
                 pass
             print("Backtest (median price move over the next 30 days, by signal):")
@@ -78,6 +79,11 @@ def main() -> None:
                 for p in periods:
                     print(f"  {p.period_name:<22} {p.signal:<14} {p.median_next_30d:>+8.1%}"
                           f"   ({p.observations:,} cards, {p.dates_observed} dates)")
+            if horizons:
+                print("Backtest by time after the signal (median price move):")
+                for h in horizons:
+                    print(f"  {h.horizon_days:>3} days  {h.signal:<14} {h.median_chg:>+8.1%}"
+                          f"   ({h.observations:,} cards, {h.share_fell_10pct:.0%} fell 10%+)")
         else:
             print("Spike study is less than a week old; skipped.")
     finally:
