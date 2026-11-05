@@ -16,6 +16,7 @@ Steps run in this order. Each step runs even if an earlier one failed, so one pr
 |---|---|---|---|
 | 1 | `ETL/load_scryfall.py` | Downloads Scryfall's `default_cards` bulk file (~80 MB, gzipped JSON Lines), keeps paper English game cards, stages them, runs `dw.usp_load_snapshot`. Deletes raw files older than 30 days. | `stg.scryfall_card` → `dw.dim_set`, `dw.dim_card`, `dw.fact_price`, `etl.load_log` |
 | 2 | `ETL/load_buylist.py` | Downloads MTGJSON `AllPricesToday`, extracts Card Kingdom buylist prices, runs `dw.usp_load_buylist_snapshot`. Refreshes the MTGJSON → Scryfall ID map when it is older than 7 days. | `dw.fact_buylist_price`, `dw.map_mtgjson_scryfall`, `etl.buylist_log` |
+| 2b | `ETL/load_boosters.py` | Every 14 days (otherwise exits at once): downloads MTGJSON `AllPrintings` (~100+ MB) and loads each set's booster layouts, runs `dw.usp_apply_boosters`. | `dw.booster_*` tables |
 | 3 | `ETL/import_manabox.py` | Reads the newest collection CSV and all `Deck:` / `Edit:` lists from the Google Drive folder, runs `dw.usp_load_manabox`. | `dw.fact_collection`, `dw.dim_deck`, `dw.fact_deck_card`, `etl.import_log` |
 | 4 | `ETL/refresh_analytics.py` | Rebuilds card trend metrics as of the latest prices; keeps 7 days of snapshots. | `dw.card_metrics` |
 | 5 | `ETL/export_tableau.py` | Writes the dashboard datasets to CSV. | `exports/tableau/*.csv` |
@@ -49,6 +50,7 @@ Force a rerun at any time: `python ETL\refresh_analytics.py --study`
 | `ETL/profile_scryfall.py` | Profiles the Scryfall file (field types, lengths, price coverage) before designing tables. |
 | `ETL/backfill_mtgjson.py` | Loads ~90 days of market price history from MTGJSON, before the first Scryfall snapshot. |
 | `ETL/load_buylist.py --backfill` | Loads ~90 days of Card Kingdom buylist history. Refuses to run once daily buylist rows exist, unless `--force`. |
+| `ETL/load_boosters.py --force` | Reloads MTGJSON booster layouts now (e.g. right after a new set releases). The daily run already refreshes them every 14 days. |
 | `ETL/load_tcgcsv.py` | Loads daily TCGplayer market prices from Feb 8, 2024 up to the regular history, from the [TCGCSV](https://tcgcsv.com) price archive. Downloads each daily file once into `data/raw/tcgcsv/` (about 1 GB, kept; reruns reuse it). Rerunnable: replaces all `tcgcsv` rows. Run after `load_archive.py`, then `refresh_analytics.py --study`. |
 | `ETL/load_archive.py` | Loads older seasons of market + buylist prices from archived MTGJSON files in `data/raw/archive/` (saved from the Wayback Machine). Rerunnable: replaces all archive rows each time. Follow with `refresh_analytics.py --study`. |
 
@@ -158,7 +160,7 @@ Sell channels (Card Kingdom buylist, local store estimate percentages) are in `d
 
 1. Install Python, then `pip install -r requirements.txt`. Install the Microsoft ODBC Driver for SQL Server if none is present.
 2. Copy `ETL/config.example.ini` to `ETL/config.ini` and fill in the server, database and Drive folder.
-3. Run the SQL scripts in SSMS **in order**: `01` through `12`. (`02_fix_cmc_size.sql` is only needed for databases created before the `cmc` fix; it is harmless otherwise.)
+3. Run the SQL scripts in SSMS **in order**: `01` through `13`. (`02_fix_cmc_size.sql` is only needed for databases created before the `cmc` fix; it is harmless otherwise.)
 4. From the project folder, run once, in order:
    ```
    python ETL\load_scryfall.py
@@ -191,6 +193,7 @@ mtg-sell-signal/
 │   ├── backfill_mtgjson.py   one-time: 90-day market price history
 │   ├── load_archive.py       one-time: older seasons from archived MTGJSON files
 │   ├── load_tcgcsv.py        one-time: daily TCGplayer prices from Feb 2024 (TCGCSV)
+│   ├── load_boosters.py      every 14 days: MTGJSON booster layouts (pack odds)
 │   ├── profile_scryfall.py   one-time: data profiling
 │   ├── config.example.ini    settings template (config.ini is not in Git)
 ├── sql/
@@ -205,7 +208,8 @@ mtg-sell-signal/
 │   ├── 09_backtest.sql            backtest
 │   ├── 10_tableau_views.sql       dashboard datasets
 │   ├── 11_archive_prices.sql      archived price seasons (Wayback MTGJSON files)
-│   └── 12_tcgcsv_prices.sql       daily TCGplayer history from Feb 2024 + source check
+│   ├── 12_tcgcsv_prices.sql       daily TCGplayer history from Feb 2024 + source check
+│   └── 13_packs.sql               booster layouts + "which pack should I open?" odds
 ├── data/                     raw downloads (not in Git)
 ├── logs/                     daily_load.log (not in Git)
 └── exports/tableau/          dashboard CSVs (not in Git: contain collection data)

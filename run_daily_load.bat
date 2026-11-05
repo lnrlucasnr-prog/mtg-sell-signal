@@ -25,6 +25,11 @@ REM Card Kingdom buylist (what CK pays), from MTGJSON's daily price file.
 "%PYTHON%" ETL\load_buylist.py >> logs\daily_load.log 2>&1
 if %ERRORLEVEL% NEQ 0 set RESULT=%ERRORLEVEL%
 
+REM Pack contents for the "which pack should I open?" views (refreshes every 14 days;
+REM usually exits at once).
+"%PYTHON%" ETL\load_boosters.py >> logs\daily_load.log 2>&1
+if %ERRORLEVEL% NEQ 0 set RESULT=%ERRORLEVEL%
+
 REM Then refresh the collection and deck lists from the Google Drive exports.
 REM Runs even if the price load failed, so one problem doesn't hide the other.
 "%PYTHON%" ETL\import_manabox.py >> logs\daily_load.log 2>&1

@@ -319,19 +319,28 @@ GO
 -- Buy list: every card in an Edit list you don't own enough copies of,
 -- priced at the cheapest current printing.
 CREATE OR ALTER VIEW dw.vw_buy_list AS
+/* Copies needed are counted at the CARD level against ALL decks (dw.vw_card_position):
+   copies already used in other decks don't count as available. Example: own 2 Sol
+   Rings, both in built decks, and this Edit deck wants one -> missing 1.
+   missing_qty on a line is capped at that line's quantity; when several Edit decks
+   want the same short card, card_shortage_qty (last column) is the true total. */
 SELECT d.deck_name,
        f.card_name,
        f.section,
        f.quantity                                              AS needed_qty,
        ISNULL(p.owned_qty, 0)                                  AS owned_qty,
        ISNULL(p.committed_qty, 0)                              AS used_in_built_decks,
-       GREATEST(f.quantity - ISNULL(p.owned_qty, 0), 0)        AS missing_qty,
+       LEAST(f.quantity, sh.shortage_qty)                      AS missing_qty,
        cp.cheapest_usd,
-       GREATEST(f.quantity - ISNULL(p.owned_qty, 0), 0) * cp.cheapest_usd AS est_cost_usd,
-       f.match_method
+       LEAST(f.quantity, sh.shortage_qty) * cp.cheapest_usd    AS est_cost_usd,
+       f.match_method,
+       sh.shortage_qty                                         AS card_shortage_qty   -- new columns go at the END
 FROM dw.fact_deck_card AS f
 JOIN dw.dim_deck AS d ON d.deck_key = f.deck_key
 LEFT JOIN dw.vw_card_position AS p ON p.oracle_id = f.oracle_id
+CROSS APPLY (SELECT CASE WHEN f.oracle_id IS NULL THEN f.quantity       -- unmatched card: assume all missing
+                         ELSE GREATEST(ISNULL(p.demand_now, f.quantity) - ISNULL(p.owned_qty, 0), 0)
+                    END AS shortage_qty) AS sh
 OUTER APPLY (SELECT MIN(fp.price_usd) AS cheapest_usd
              FROM dw.dim_card AS c
              JOIN dw.fact_price AS fp ON fp.card_key = c.card_key AND fp.valid_to IS NULL

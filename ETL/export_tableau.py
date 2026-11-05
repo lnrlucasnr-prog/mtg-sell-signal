@@ -36,6 +36,9 @@ DATASETS = {
     "set_value_curve":     "SELECT * FROM dw.vw_tableau_set_value_curve",
     "run_info":            "SELECT * FROM dw.vw_tableau_run_info",
     "findings":            "SELECT * FROM dw.vw_dashboard_findings ORDER BY finding_order",
+    "pack_options":        "SELECT * FROM dw.vw_pack_options",
+    "pack_card_odds":      "SELECT * FROM dw.vw_pack_card_odds",
+    "wanted_card_sources": "SELECT * FROM dw.vw_wanted_card_sources",
 }
 
 
