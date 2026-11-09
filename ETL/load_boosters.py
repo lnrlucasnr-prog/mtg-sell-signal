@@ -33,7 +33,9 @@ from load_scryfall import connect
 from profile_scryfall import HEADERS
 
 MTGJSON_URL = "https://mtgjson.com/api/v5/AllPrintings.json.gz"
-RAW_FILE = Path("data/raw/mtgjson/AllPrintings.json.gz")
+# The project folder (mtg-sell-signal), so paths work whichever folder a script is run from
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+RAW_FILE = PROJECT_ROOT / "data" / "raw" / "mtgjson" / "AllPrintings.json.gz"
 REFRESH_DAYS = 14
 BATCH_SIZE = 20000
 SKIP_TYPES = ("arena", "mtgo")          # digital-only pack types

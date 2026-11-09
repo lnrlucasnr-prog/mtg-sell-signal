@@ -35,7 +35,9 @@ from load_scryfall import connect
 from profile_scryfall import HEADERS
 
 MTGJSON_BASE = "https://mtgjson.com/api/v5/"
-RAW_DIR = Path("data/raw/mtgjson")
+# The project folder (mtg-sell-signal), so paths work whichever folder a script is run from
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+RAW_DIR = PROJECT_ROOT / "data" / "raw" / "mtgjson"
 BATCH_SIZE = 20000
 FINISH_MAP = {"normal": "nonfoil", "foil": "foil", "etched": "etched"}
 

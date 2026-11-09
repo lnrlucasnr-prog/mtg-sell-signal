@@ -26,6 +26,7 @@
    Views (all read the CURRENT collection and Edit decks, so they update daily):
      dw.vw_pack_options        one row per set + pack type that has a wanted card
      dw.vw_pack_card_odds      one row per wanted card per pack it can come from
+     dw.vw_pack_printing_odds  the same, split by PRINTING (each look), with images
      dw.vw_pack_value          average total value of a whole pack (market and
                                Card Kingdom buylist), for every pack type
      dw.vw_wanted_card_sources every wanted card: which sets it was printed in and
@@ -390,13 +391,81 @@ JOIN dw.vw_pack_type AS pt ON pt.set_code = pc.set_code AND pt.booster_type = pc
 JOIN dw.vw_wanted_card AS w ON w.oracle_id = pc.oracle_id
 OUTER APPLY (SELECT TOP 1 booster_name FROM dw.booster_config AS b
              WHERE b.set_code = pc.set_code AND b.booster_type = pc.booster_type) AS bn
-OUTER APPLY (SELECT TOP 1 h.image_url FROM dw.vw_pack_sheet_hit AS h
-             WHERE h.set_code = pc.set_code AND h.booster_type = pc.booster_type
-               AND h.oracle_id = pc.oracle_id ORDER BY h.wanted_weight DESC) AS img
+OUTER APPLY (SELECT TOP 1 c.image_url             -- the version you're most likely to pull
+             FROM dw.booster_sheet_card AS sc
+             JOIN dw.dim_card AS c ON c.card_key = sc.card_key
+             WHERE sc.set_code = pc.set_code AND sc.booster_type = pc.booster_type
+               AND c.oracle_id = pc.oracle_id
+             GROUP BY c.image_url
+             ORDER BY SUM(sc.card_weight) DESC) AS img
 OUTER APPLY (SELECT MIN(f.price_usd) AS cheapest_single_usd
              FROM dw.dim_card AS c
              JOIN dw.fact_price AS f ON f.card_key = c.card_key AND f.valid_to IS NULL
              WHERE c.oracle_id = pc.oracle_id) AS ch;
+GO
+
+/* One row per wanted card per pack per PRINTING (each distinct look: regular,
+   showcase, borderless, ...). Foil and nonfoil of the same printing count as one
+   look. chance_this_version = chance a pack contains that look;
+   chance_any_version = the card-level chance from dw.vw_pack_card_odds
+   (any look counts), which this view does not change. */
+CREATE OR ALTER VIEW dw.vw_pack_printing_odds AS
+WITH hit AS (
+    SELECT sc.set_code, sc.booster_type, sc.sheet_name, sc.card_key, c.oracle_id, sh.is_foil,
+           SUM(sc.card_weight) AS w
+    FROM dw.booster_sheet_card AS sc
+    JOIN dw.booster_sheet AS sh
+      ON sh.set_code = sc.set_code AND sh.booster_type = sc.booster_type AND sh.sheet_name = sc.sheet_name
+    JOIN dw.dim_card AS c ON c.card_key = sc.card_key
+    JOIN dw.vw_wanted_card AS wc ON wc.oracle_id = c.oracle_id
+    GROUP BY sc.set_code, sc.booster_type, sc.sheet_name, sc.card_key, c.oracle_id, sh.is_foil
+), per_config AS (
+    SELECT h.set_code, h.booster_type, h.card_key, h.oracle_id, cs.config_no,
+           CAST(cfg.config_weight AS FLOAT) / cfg.total_config_weight            AS config_share,
+           SUM(cs.picks * LOG(CASE WHEN CAST(h.w AS FLOAT) / sh.total_weight >= 1 THEN 1e-12
+                                   ELSE 1 - CAST(h.w AS FLOAT) / sh.total_weight END)) AS log_miss
+    FROM hit AS h
+    JOIN dw.booster_sheet AS sh
+      ON sh.set_code = h.set_code AND sh.booster_type = h.booster_type AND sh.sheet_name = h.sheet_name
+    JOIN dw.booster_config_sheet AS cs
+      ON cs.set_code = h.set_code AND cs.booster_type = h.booster_type AND cs.sheet_name = h.sheet_name
+    JOIN dw.booster_config AS cfg
+      ON cfg.set_code = cs.set_code AND cfg.booster_type = cs.booster_type AND cfg.config_no = cs.config_no
+    GROUP BY h.set_code, h.booster_type, h.card_key, h.oracle_id, cs.config_no,
+             cfg.config_weight, cfg.total_config_weight
+), per_version AS (
+    SELECT set_code, booster_type, card_key, oracle_id,
+           SUM(config_share * (1 - EXP(log_miss))) AS chance
+    FROM per_config
+    GROUP BY set_code, booster_type, card_key, oracle_id
+)
+SELECT bs.set_name,
+       LOWER(v.set_code)                                            AS set_code,
+       bs.release_date,
+       v.booster_type,
+       co.booster_name,
+       co.card_name,
+       co.decks,
+       ps.set_name                                                  AS printing_set_name,
+       c.set_code                                                   AS printing_set_code,
+       c.collector_number,
+       CAST(v.chance AS DECIMAL(9,6))                               AS chance_this_version,
+       CAST(1 / NULLIF(v.chance, 0) AS DECIMAL(12,1))               AS one_in_n_packs_this_version,
+       co.chance_per_pack                                           AS chance_any_version,
+       pr.price_usd                                                 AS version_price_usd,
+       c.image_url,
+       v.oracle_id,
+       co.pack_kind
+FROM per_version AS v
+JOIN dw.booster_set AS bs ON bs.set_code = v.set_code
+JOIN dw.dim_card AS c ON c.card_key = v.card_key
+LEFT JOIN dw.dim_set AS ps ON ps.set_code = c.set_code
+JOIN dw.vw_pack_card_odds AS co
+  ON co.set_code = LOWER(v.set_code) AND co.booster_type = v.booster_type AND co.oracle_id = v.oracle_id
+OUTER APPLY (SELECT TOP 1 f.price_usd
+             FROM dw.fact_price AS f
+             WHERE f.card_key = v.card_key AND f.valid_to IS NULL
+             ORDER BY CASE f.finish WHEN 'nonfoil' THEN 1 WHEN 'foil' THEN 2 ELSE 3 END) AS pr;   -- nonfoil price when it exists
 GO
 
 /* One row per set + pack type: chance of pulling ANY wanted card */

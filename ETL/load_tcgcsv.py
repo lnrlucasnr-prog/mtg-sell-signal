@@ -50,7 +50,9 @@ from load_scryfall import connect
 from profile_scryfall import RAW_DIR as SCRYFALL_RAW_DIR, iter_cards
 
 ARCHIVE_URL = "https://tcgcsv.com/archive/tcgplayer/prices-{d}.ppmd.7z"
-TCGCSV_DIR = Path("data/raw/tcgcsv")
+# The project folder (mtg-sell-signal), so paths work whichever folder a script is run from
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+TCGCSV_DIR = PROJECT_ROOT / "data" / "raw" / "tcgcsv"
 FIRST_DAY = date(2024, 2, 8)          # TCGCSV's archive starts here
 MAGIC_CATEGORY = "1"
 PAUSE_SECONDS = 6.0                   # between downloads (guidelines ask for >= 0.1 s; files are a few MB)

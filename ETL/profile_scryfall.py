@@ -39,8 +39,10 @@ HEADERS = {
 }
 BULK_INDEX_URL = "https://api.scryfall.com/bulk-data"
 
-RAW_DIR = Path("data/raw")
-PROFILE_DIR = Path("data/profile")
+# The project folder (mtg-sell-signal), so paths work whichever folder a script is run from
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+RAW_DIR = PROJECT_ROOT / "data" / "raw"
+PROFILE_DIR = PROJECT_ROOT / "data" / "profile"
 
 # Categorical fields worth seeing the full distribution of.
 CATEGORICAL_FIELDS = [

@@ -17,7 +17,8 @@ from pathlib import Path
 
 from load_scryfall import connect
 
-EXPORT_DIR = Path("exports/tableau")
+# Always the project's exports\tableau folder, whichever folder the script is run from
+EXPORT_DIR = Path(__file__).resolve().parent.parent / "exports" / "tableau"
 
 # file name -> query
 DATASETS = {
@@ -38,6 +39,7 @@ DATASETS = {
     "findings":            "SELECT * FROM dw.vw_dashboard_findings ORDER BY finding_order",
     "pack_options":        "SELECT * FROM dw.vw_pack_options",
     "pack_card_odds":      "SELECT * FROM dw.vw_pack_card_odds",
+    "pack_printing_odds":  "SELECT * FROM dw.vw_pack_printing_odds",
     "wanted_card_sources": "SELECT * FROM dw.vw_wanted_card_sources",
 }
 

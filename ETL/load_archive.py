@@ -53,7 +53,9 @@ from backfill_mtgjson import compress, to_price
 from load_buylist import ensure_id_map
 from load_scryfall import connect
 
-ARCHIVE_DIR = Path("data/raw/archive")
+# The project folder (mtg-sell-signal), so paths work whichever folder a script is run from
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+ARCHIVE_DIR = PROJECT_ROOT / "data" / "raw" / "archive"
 BATCH_SIZE = 20000
 FINISH_MAP = {"normal": "nonfoil", "foil": "foil", "etched": "etched"}
 # kind -> (vendor key, price list) inside MTGJSON's paper prices
